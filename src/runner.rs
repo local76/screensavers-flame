@@ -119,11 +119,49 @@ use windows_sys::Win32::System::Console::{
 };
 
 #[cfg(target_os = "windows")]
+#[repr(C)]
+struct RECT {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+    fn timeEndPeriod(uPeriod: u32) -> u32;
+    fn GetDC(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+    fn ReleaseDC(hwnd: *mut std::ffi::c_void, hdc: *mut std::ffi::c_void) -> i32;
+    fn GetDeviceCaps(hdc: *mut std::ffi::c_void, index: i32) -> i32;
+    fn GetCursorPos(lpPoint: *mut windows_sys::Win32::Foundation::POINT) -> i32;
+    fn GetAsyncKeyState(vKey: i32) -> i16;
+    fn GetConsoleWindow() -> windows_sys::Win32::Foundation::HWND;
+    fn GetWindowLongW(hWnd: windows_sys::Win32::Foundation::HWND, nIndex: i32) -> i32;
+    fn SetWindowLongW(hWnd: windows_sys::Win32::Foundation::HWND, nIndex: i32, dwNewLong: i32) -> i32;
+    fn SetWindowPos(
+        hWnd: windows_sys::Win32::Foundation::HWND,
+        hWndInsertAfter: windows_sys::Win32::Foundation::HWND,
+        X: i32,
+        Y: i32,
+        cx: i32,
+        cy: i32,
+        uFlags: u32,
+    ) -> i32;
+    fn GetSystemMetrics(nIndex: i32) -> i32;
+    fn ShowWindow(hWnd: windows_sys::Win32::Foundation::HWND, nCmdShow: i32) -> i32;
+    fn GetWindowRect(hWnd: windows_sys::Win32::Foundation::HWND, lpRect: *mut RECT) -> i32;
+}
+
+#[cfg(target_os = "windows")]
 struct RawTerminalGuard {
     stdin_handle: windows_sys::Win32::Foundation::HANDLE,
     stdout_handle: windows_sys::Win32::Foundation::HANDLE,
     original_in_mode: u32,
     original_out_mode: u32,
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    original_style: i32,
+    original_rect: [i32; 4],
 }
 
 #[cfg(target_os = "windows")]
@@ -158,11 +196,43 @@ impl RawTerminalGuard {
             let raw_out_mode = original_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
             let _ = SetConsoleMode(stdout_handle, raw_out_mode);
 
+            // Set high-resolution sleep timer
+            let _ = timeBeginPeriod(1);
+
+            // Fullscreen console window setup
+            let hwnd = GetConsoleWindow();
+            let mut original_style = 0;
+            let mut original_rect = [0; 4];
+            if hwnd != 0 {
+                original_style = GetWindowLongW(hwnd, -16); // GWL_STYLE = -16
+                let mut rect: RECT = std::mem::zeroed();
+                if GetWindowRect(hwnd, &mut rect) != 0 {
+                    original_rect = [
+                        rect.left,
+                        rect.top,
+                        rect.right - rect.left,
+                        rect.bottom - rect.top,
+                    ];
+                }
+
+                // Remove borders and title bar
+                let new_style = original_style & !(0x00C00000 | 0x00040000 | 0x00020000 | 0x00010000 | 0x00080000); // WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU
+                SetWindowLongW(hwnd, -16, new_style);
+
+                let width = GetSystemMetrics(0); // SM_CXSCREEN = 0
+                let height = GetSystemMetrics(1); // SM_CYSCREEN = 1
+                SetWindowPos(hwnd, 0, 0, 0, width, height, 0x0020 | 0x0040); // SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040
+                ShowWindow(hwnd, 3); // SW_MAXIMIZE = 3
+            }
+
             Some(Self {
                 stdin_handle,
                 stdout_handle,
                 original_in_mode,
                 original_out_mode,
+                hwnd,
+                original_style,
+                original_rect,
             })
         }
     }
@@ -174,8 +244,70 @@ impl Drop for RawTerminalGuard {
         unsafe {
             let _ = SetConsoleMode(self.stdin_handle, self.original_in_mode);
             let _ = SetConsoleMode(self.stdout_handle, self.original_out_mode);
+            
+            // Restore window style and position
+            if self.hwnd != 0 {
+                SetWindowLongW(self.hwnd, -16, self.original_style);
+                let x = self.original_rect[0];
+                let y = self.original_rect[1];
+                let w = self.original_rect[2];
+                let h = self.original_rect[3];
+                SetWindowPos(self.hwnd, 0, x, y, w, h, 0x0020 | 0x0040); // SWP_FRAMECHANGED | SWP_SHOWWINDOW
+            }
+
+            // End high-resolution timer period
+            let _ = timeEndPeriod(1);
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn get_monitor_refresh_rate() -> u32 {
+    unsafe {
+        let hdc = GetDC(std::ptr::null_mut());
+        if !hdc.is_null() {
+            let rate = GetDeviceCaps(hdc, 116); // 116 = VREFRESH
+            ReleaseDC(std::ptr::null_mut(), hdc);
+            if rate > 0 {
+                return rate as u32;
+            }
+        }
+    }
+    60
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_monitor_refresh_rate() -> u32 {
+    60
+}
+
+#[cfg(target_os = "windows")]
+fn check_mouse_activity(initial_pos: &mut Option<(i32, i32)>) -> bool {
+    unsafe {
+        let mut pt: windows_sys::Win32::Foundation::POINT = std::mem::zeroed();
+        if GetCursorPos(&mut pt) != 0 {
+            if let Some((init_x, init_y)) = *initial_pos {
+                let dx = (pt.x - init_x).abs();
+                let dy = (pt.y - init_y).abs();
+                if dx > 10 || dy > 10 {
+                    return true;
+                }
+            } else {
+                *initial_pos = Some((pt.x, pt.y));
+            }
+        }
+
+        // Check mouse clicks: VK_LBUTTON = 0x01, VK_RBUTTON = 0x02, VK_MBUTTON = 0x04
+        if GetAsyncKeyState(0x01) != 0 || GetAsyncKeyState(0x02) != 0 || GetAsyncKeyState(0x04) != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+fn check_mouse_activity(_initial_pos: &mut Option<(i32, i32)>) -> bool {
+    false
 }
 
 #[cfg(target_os = "windows")]
@@ -347,13 +479,23 @@ fn run_fullscreen<S: Screensaver + 'static>(mut saver: S) -> isize {
     let mut grid = vec![TerminalCell::default(); cols * rows];
     let mut last_frame = std::time::Instant::now();
 
-    // Target ~60 FPS
-    let target_fps = 60u32;
+    // Query actual monitor refresh rate
+    let target_fps = get_monitor_refresh_rate();
     let frame_duration = Duration::from_secs_f32(1.0 / target_fps as f32);
+
+    let mut initial_mouse_pos = None;
+    let start_time = std::time::Instant::now();
 
     loop {
         if check_keypress() {
             break;
+        }
+
+        // Prevent instant exit on startup due to initial mouse shake or clicks
+        if start_time.elapsed() > Duration::from_millis(500) {
+            if check_mouse_activity(&mut initial_mouse_pos) {
+                break;
+            }
         }
 
         // Handle terminal resize dynamically
