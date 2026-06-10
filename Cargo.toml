@@ -7,13 +7,14 @@ autobins = false
 
 [[bin]]
 name = "flame"
-path = "src/main.rs"
+path = "src/screensaver_shim.rs"
 
 [dependencies]
-library = { git = "https://github.com/local76/library.git", branch = "main", default-features = false, features = ["scenes", "screensaver-runtime", "role-application", "lifecycle-foreground", "platform-native"] }
+library = { git = "https://github.com/local76/library.git", branch = "main", features = ["screensaver-runtime"] }
 
 [build-dependencies]
-winres = "0.1"
+library = { git = "https://github.com/local76/library.git", branch = "main" }
+embed-resource = "2"
 
 [profile.release]
 opt-level = "z"

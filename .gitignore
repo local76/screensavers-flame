@@ -1,3 +1,5 @@
+/assets/*_split
+/build
 /target
 **/*.rs.bk
 *.scr
