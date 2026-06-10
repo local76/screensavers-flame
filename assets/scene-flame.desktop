@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=flame - retro terminal screensaver effect
+Comment=Screensaver effect: flame
+Exec=flame
+Icon=flame
+Terminal=false
+Categories=Screensaver;

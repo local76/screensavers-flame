@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screensaver name="scene-flame" _label="flame - retro terminal screensaver effect">
+  <command arg="-fullscreen -bg black -fg white -e /usr/libexec/screensaver-shims/flame"/>
+  <_description>
+    Retro terminal screensaver effect (flame) from the screensavers collection.
+  </_description>
+</screensaver>
