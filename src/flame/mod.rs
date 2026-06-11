@@ -1,4 +1,4 @@
-﻿//! Consolidated flame screensaver effect module.
+//! Consolidated flame screensaver effect module.
 //!
 //! **Taxonomy Classification**: System Role (Purpose - Application Software).
 
@@ -34,7 +34,11 @@ pub struct Flame {
     pub(crate) sys_refresh_timer: f32,
     pub(crate) mem_pressure: f32,
     pub(crate) cpu_load: f32,
-    pub(crate) host_bias: f32,
+    pub(crate) _host_bias: f32,
+    pub(super) on_battery: bool,
+    pub(super) frame_time_ema: f32,
+    pub(super) quality_scale: f32,
+    pub(super) target_frame_time: f32,
 }
 
 impl Default for Flame {
@@ -61,7 +65,8 @@ impl Flame {
         let sys = get_system_info();
         let host_bias = sys.hostname.chars().map(|c| c as u32).sum::<u32>() as f32 / 1000.0 % 1.0;
         let mem_pressure = sys.mem_used_pct / 100.0;
-        let cpu_load = 0.4;
+        let cpu_load = (sys.cpu_usage_pct / 100.0).clamp(0.0, 1.0);
+        let on_battery = sys.power_status.contains("Battery");
 
         Self {
             rng: LcgRng::new(9999),
@@ -80,24 +85,50 @@ impl Flame {
             sys_refresh_timer: 0.0,
             mem_pressure,
             cpu_load,
-            host_bias,
+            _host_bias: host_bias,
+            on_battery,
+            frame_time_ema: 0.01666667,
+            quality_scale: 1.0,
+            target_frame_time: 0.01666667,
         }
     }
 }
 
 impl Screensaver for Flame {
     fn update(&mut self, dt: Duration, cols: usize, rows: usize) {
-        let delta = dt.as_secs_f32();
+        let dt_secs = dt.as_secs_f32();
+
+        // Auto-detect high refresh rates during the startup phase
+        if self.time_elapsed < 2.0 && dt_secs > 0.001 {
+            if dt_secs < self.target_frame_time - 0.001 {
+                self.target_frame_time = dt_secs;
+            }
+        }
+
+        // Exponential moving average for frame time (alpha = 0.1)
+        self.frame_time_ema = self.frame_time_ema * 0.9 + dt_secs.min(0.2) * 0.1;
+
+        let speed_mult = if self.on_battery { 0.65 } else { 1.0 };
+        let delta = dt_secs * speed_mult;
         self.time_elapsed += delta;
         self.physics_accumulator += delta;
+
+        // Adjust quality_scale based on frame time performance vs target
+        if self.time_elapsed > 1.5 {
+            if self.frame_time_ema > self.target_frame_time * 1.15 {
+                self.quality_scale = (self.quality_scale - 0.15 * delta).max(0.20);
+            } else if self.frame_time_ema < self.target_frame_time * 1.05 {
+                self.quality_scale = (self.quality_scale + 0.04 * delta).min(1.0);
+            }
+        }
 
         // Live system refresh ~every sec
         self.sys_refresh_timer += delta;
         if self.sys_refresh_timer >= 1.0 {
             let sys = get_system_info();
             self.mem_pressure = sys.mem_used_pct / 100.0;
-            self.cpu_load = (self.mem_pressure * 0.7 + 0.25).min(0.95);
-            if self.host_bias > 0.7 { self.cpu_load = (self.cpu_load + 0.1).min(0.98); }
+            self.cpu_load = (sys.cpu_usage_pct / 100.0).clamp(0.0, 1.0);
+            self.on_battery = sys.power_status.contains("Battery");
             self.sys_refresh_timer = 0.0;
         }
 
@@ -107,10 +138,8 @@ impl Screensaver for Flame {
             self.sparks.clear();
             self.logo_cells.clear();
             self.volcanic_globs.clear();
-            // library 4.1: render the centered system-logo overlay from
-            // the live system info (replaces the pre-4.1
-            // `trance_core::logo_lines()` + `logo_dimensions()` Windows-only
-            // file read).
+            self.stars.clear();
+
             let logo_text = get_system_info().logo_text;
             let lines = render_logo_block(&logo_text, None);
             let logo_h = lines.len();
@@ -134,31 +163,32 @@ impl Screensaver for Flame {
             self.last_cols = cols;
             self.last_rows = rows;
 
-            // Create background stars
-            let target_stars = (cols * rows / 20).clamp(10, 80);
-            let mut stars = Vec::new();
-            for i in 0..target_stars {
-                stars.push(Star {
-                    x: self.rng.next_f32(),
-                    y: self.rng.next_f32(),
-                    phase: self.rng.next_f32() * std::f32::consts::TAU,
-                    ch: if i % 7 == 0 { '✦' } else if i % 3 == 0 { '•' } else { '.' },
-                    excitation: 0.0,
-                    excited_color: (255, 255, 255),
-                });
-            }
-            self.stars = stars;
-
-            // library 4.0: refresh the fire heat ramp from the canonical
-            // ScreenPalette. The pre-4.0 cached `self.theme_accent` field
-            // is gone; the per-frame accent is now pulled from
-            // `query_current_palette()` in `drawing.rs` directly.
             let accent = query_current_palette().accent;
             self.palette = physics::get_palette(accent);
         }
 
-        // 2. Fixed timestep step for fire cellular automata at 32 Hz
+        // Dynamically adjust star population to match target capacity
+        let target_stars = (((cols * rows / 20).clamp(10, 80)) as f32 * self.quality_scale * (if self.on_battery { 0.55 } else { 1.0 })) as usize;
+        if self.stars.len() > target_stars {
+            self.stars.truncate(target_stars);
+        } else if self.stars.len() < target_stars && target_stars > 0 {
+            while self.stars.len() < target_stars {
+                self.stars.push(Star {
+                    x: self.rng.next_f32(),
+                    y: self.rng.next_f32(),
+                    phase: self.rng.next_f32() * std::f32::consts::TAU,
+                    ch: if self.stars.len() % 7 == 0 { '✦' } else if self.stars.len() % 3 == 0 { '•' } else { '.' },
+                    excitation: 0.0,
+                    excited_color: (255, 255, 255),
+                });
+            }
+        }
+
+        // 2. Fixed timestep step for fire cellular automata at 32 Hz (with spiral safety limit)
         let physics_step = 0.031;
+        if self.physics_accumulator > physics_step * 2.0 {
+            self.physics_accumulator = physics_step * 2.0;
+        }
         while self.physics_accumulator >= physics_step {
             self.physics_accumulator -= physics_step;
             physics::step_fire(self, cols, rows);
@@ -180,11 +210,13 @@ impl Screensaver for Flame {
             let average_heat = column_heat / (check_depth as f32 * 35.0);
             cell.temp = cell.temp * 0.86 + average_heat * 0.14;
 
-            let spark_logo_prob = match self.spark_count_opt {
+            let mut spark_logo_prob = match self.spark_count_opt {
                 0 => 0.0135,
                 2 => 0.1125,
                 _ => 0.045,
             };
+            spark_logo_prob *= self.quality_scale * (if self.on_battery { 0.55 } else { 1.0 });
+
             if cell.temp > 0.15 && self.rng.next_bool(spark_logo_prob) {
                 self.sparks.push(Spark {
                     x: cell.x as f32,
@@ -198,11 +230,13 @@ impl Screensaver for Flame {
         }
 
         // Spawn sparks from top of the fire grid columns
-        let spark_top_prob = match self.spark_count_opt {
+        let mut spark_top_prob = match self.spark_count_opt {
             0 => 0.072,
             2 => 0.60,
             _ => 0.24,
         };
+        spark_top_prob *= self.quality_scale * (if self.on_battery { 0.55 } else { 1.0 });
+
         if self.rng.next_bool(spark_top_prob) {
             let x = self.rng.next_usize(cols);
             for y in (rows / 2..rows - 2).rev() {

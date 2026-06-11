@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screensaver name="local76-flame" _label="Flame">
+  <command arg="-fullscreen -bg black -fg white -ms black -xrm 'XTerm*pointerColorBackground: black' -xrm 'XTerm*pointerMode: 2' -e /usr/libexec/local76/screensavers/flame"/>
+  <_description>
+    Retro terminal screensaver effect (flame) from the screensavers collection.
+  </_description>
+</screensaver>

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Flame
+Comment=Screensaver effect: flame
+Exec=env XCURSOR_PATH=/nonexistent XCURSOR_THEME=none xterm -fullscreen -bg black -fg white -ms black -xrm "XTerm*pointerColorBackground: black" -xrm "XTerm*pointerMode: 2" -e /usr/libexec/local76/screensavers/flame
+Icon=local76-flame
+Terminal=false
+Categories=Screensaver;
