@@ -1,6 +1,6 @@
 [package]
 name = "flame"
-version = "2026.7.0"
+version = "2026.6.10-1"
 edition = "2021"
 description = "flame - retro terminal screensaver effect"
 autobins = false
@@ -10,10 +10,10 @@ name = "flame"
 path = "src/main.rs"
 
 [dependencies]
-library = { git = "https://github.com/local76/library.git", branch = "main" }
+library = { git = "https://github.com/local76/library.git", tag = "v2026.6.10-1", features = ["screensaver-runtime"] }
 
 [build-dependencies]
-library = { git = "https://github.com/local76/library.git", branch = "main" }
+library = { git = "https://github.com/local76/library.git", tag = "v2026.6.10-1", features = ["screensaver-runtime"] }
 embed-resource = "2"
 
 [profile.release]
@@ -38,7 +38,7 @@ assets = [
 
 [package.metadata.generate-rpm]
 name = "scene-flame"
-version = "2026.7.0"
+version = "2026.6.10-1"
 release = "1"
 arch = "x86_64"
 summary = "flame - retro terminal screensaver effect"
