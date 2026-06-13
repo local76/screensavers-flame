@@ -30,3 +30,32 @@ lto = true               # Enable Link Time Optimization
 codegen-units = 1        # Reduce codegen units to maximize size reduction
 panic = "abort"          # Remove panic unwinding code
 strip = true             # Strip symbols and debuginfo
+
+[package.metadata.deb]
+name = "scene-flame"
+maintainer = "Screensavers Developer <dev@local76.org>"
+extended-description = "Screensaver effect (flame) part of the screensavers collection."
+depends = "libc6, xterm"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/flame", "usr/libexec/local76/screensavers/flame", "755"],
+    ["assets/local76-flame.desktop", "usr/share/applications/local76-flame.desktop", "644"],
+    ["assets/local76-flame.xml", "usr/share/xscreensaver/config/local76-flame.xml", "644"],
+    ["assets/local76-flame.png", "usr/share/pixmaps/local76-flame.png", "644"]
+]
+
+[package.metadata.generate-rpm]
+name = "scene-flame"
+version = "2026.6.10-1"
+release = "1"
+arch = "x86_64"
+summary = "flame - retro terminal screensaver effect"
+description = "Screensaver effect (flame) part of the screensavers collection."
+license = "MIT"
+assets = [
+    { source = "target/release/flame", dest = "/usr/libexec/local76/screensavers/flame", mode = "755" },
+    { source = "assets/local76-flame.desktop", dest = "/usr/share/applications/local76-flame.desktop", mode = "644" },
+    { source = "assets/local76-flame.xml", dest = "/usr/share/xscreensaver/config/local76-flame.xml", mode = "644" },
+    { source = "assets/local76-flame.png", dest = "/usr/share/pixmaps/local76-flame.png", mode = "644" }
+]
